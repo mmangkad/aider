@@ -27,32 +27,55 @@ try:
     httpx.Limits.__init__ = _patched_httpx_limits_init
     print(f"[PATCH] httpx.Limits default patched to max_connections={CONNECTION_LIMIT}", file=sys.stderr)
     
-    # Also patch the module-level DEFAULT_LIMITS that was already created at import time
+    # Mutate the existing DEFAULT_LIMITS object (function defaults hold references to this object)
     import httpx._config
-    httpx._config.DEFAULT_LIMITS = httpx.Limits(
-        max_connections=CONNECTION_LIMIT,
-        max_keepalive_connections=CONNECTION_LIMIT
-    )
-    # Also update the reference in the client module
+    httpx._config.DEFAULT_LIMITS.max_connections = CONNECTION_LIMIT
+    httpx._config.DEFAULT_LIMITS.max_keepalive_connections = CONNECTION_LIMIT
+    # Also update the reference in the client module (in case it was copied)
     import httpx._client
-    httpx._client.DEFAULT_LIMITS = httpx._config.DEFAULT_LIMITS
-    print(f"[PATCH] httpx._config.DEFAULT_LIMITS replaced", file=sys.stderr)
+    if httpx._client.DEFAULT_LIMITS is not httpx._config.DEFAULT_LIMITS:
+        httpx._client.DEFAULT_LIMITS.max_connections = CONNECTION_LIMIT
+        httpx._client.DEFAULT_LIMITS.max_keepalive_connections = CONNECTION_LIMIT
+    print(f"[PATCH] httpx DEFAULT_LIMITS mutated to max_connections={CONNECTION_LIMIT}", file=sys.stderr)
 except ImportError:
     pass
 
 # Patch aiohttp (used by litellm for async requests by default)
+# Need to patch all connector classes: BaseConnector, TCPConnector, UnixConnector, NamedPipeConnector
 try:
     import aiohttp
-    _original_aiohttp_connector_init = aiohttp.TCPConnector.__init__
+    from aiohttp.connector import BaseConnector, TCPConnector, UnixConnector, NamedPipeConnector
     
-    def _patched_aiohttp_connector_init(self, *, limit=100, limit_per_host=0, **kwargs):
-        # Override if using default (100) or any value lower than our high limit
+    _original_base_connector_init = BaseConnector.__init__
+    _original_tcp_connector_init = TCPConnector.__init__
+    _original_unix_connector_init = UnixConnector.__init__
+    _original_namedpipe_connector_init = NamedPipeConnector.__init__
+    
+    def _patched_base_connector_init(self, *, limit=100, limit_per_host=0, **kwargs):
         if limit < CONNECTION_LIMIT:
             limit = CONNECTION_LIMIT
-        return _original_aiohttp_connector_init(self, limit=limit, limit_per_host=limit_per_host, **kwargs)
+        return _original_base_connector_init(self, limit=limit, limit_per_host=limit_per_host, **kwargs)
     
-    aiohttp.TCPConnector.__init__ = _patched_aiohttp_connector_init
-    print(f"[PATCH] aiohttp.TCPConnector default patched to limit={CONNECTION_LIMIT}", file=sys.stderr)
+    def _patched_tcp_connector_init(self, *, limit=100, limit_per_host=0, **kwargs):
+        if limit < CONNECTION_LIMIT:
+            limit = CONNECTION_LIMIT
+        return _original_tcp_connector_init(self, limit=limit, limit_per_host=limit_per_host, **kwargs)
+    
+    def _patched_unix_connector_init(self, *, limit=100, limit_per_host=0, **kwargs):
+        if limit < CONNECTION_LIMIT:
+            limit = CONNECTION_LIMIT
+        return _original_unix_connector_init(self, limit=limit, limit_per_host=limit_per_host, **kwargs)
+    
+    def _patched_namedpipe_connector_init(self, *, limit=100, limit_per_host=0, **kwargs):
+        if limit < CONNECTION_LIMIT:
+            limit = CONNECTION_LIMIT
+        return _original_namedpipe_connector_init(self, limit=limit, limit_per_host=limit_per_host, **kwargs)
+    
+    BaseConnector.__init__ = _patched_base_connector_init
+    TCPConnector.__init__ = _patched_tcp_connector_init
+    UnixConnector.__init__ = _patched_unix_connector_init
+    NamedPipeConnector.__init__ = _patched_namedpipe_connector_init
+    print(f"[PATCH] aiohttp connectors patched to limit={CONNECTION_LIMIT}", file=sys.stderr)
 except ImportError:
     pass
 
