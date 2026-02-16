@@ -45,8 +45,7 @@ try:
 except ImportError:
     pass
 
-# Clean up patch helpers
-del CONNECTION_LIMIT
+# Note: CONNECTION_LIMIT is kept in scope for the patched functions to reference
 # =============================================================================
 
 import datetime
