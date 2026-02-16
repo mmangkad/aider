@@ -1,4 +1,54 @@
 #!/usr/bin/env python3
+
+# =============================================================================
+# PATCH: Increase HTTP connection limits before any libraries import httpx/aiohttp
+# This fixes the default 100 connection limit that bottlenecks high concurrency
+# =============================================================================
+import sys
+
+# Set a very high default connection limit (4096) for all HTTP clients
+# This ensures benchmarks can scale beyond the default 100-connection bottleneck
+CONNECTION_LIMIT = 4096
+
+# Patch httpx (used by litellm for sync requests)
+try:
+    import httpx
+    _original_httpx_limits_init = httpx.Limits.__init__
+    
+    def _patched_httpx_limits_init(self, max_connections=100, max_keepalive_connections=20, **kwargs):
+        # Override if using defaults (100, 20) or any value lower than our high limit
+        if max_connections < CONNECTION_LIMIT:
+            max_connections = CONNECTION_LIMIT
+        if max_keepalive_connections < CONNECTION_LIMIT:
+            max_keepalive_connections = CONNECTION_LIMIT
+        return _original_httpx_limits_init(self, max_connections=max_connections, 
+                                          max_keepalive_connections=max_keepalive_connections, **kwargs)
+    
+    httpx.Limits.__init__ = _patched_httpx_limits_init
+    print(f"[PATCH] httpx.Limits default patched to max_connections={CONNECTION_LIMIT}", file=sys.stderr)
+except ImportError:
+    pass
+
+# Patch aiohttp (used by litellm for async requests by default)
+try:
+    import aiohttp
+    _original_aiohttp_connector_init = aiohttp.TCPConnector.__init__
+    
+    def _patched_aiohttp_connector_init(self, *, limit=100, limit_per_host=0, **kwargs):
+        # Override if using default (100) or any value lower than our high limit
+        if limit < CONNECTION_LIMIT:
+            limit = CONNECTION_LIMIT
+        return _original_aiohttp_connector_init(self, limit=limit, limit_per_host=limit_per_host, **kwargs)
+    
+    aiohttp.TCPConnector.__init__ = _patched_aiohttp_connector_init
+    print(f"[PATCH] aiohttp.TCPConnector default patched to limit={CONNECTION_LIMIT}", file=sys.stderr)
+except ImportError:
+    pass
+
+# Clean up patch helpers
+del CONNECTION_LIMIT
+# =============================================================================
+
 import datetime
 import json
 import os
