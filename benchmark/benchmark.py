@@ -26,6 +26,17 @@ try:
     
     httpx.Limits.__init__ = _patched_httpx_limits_init
     print(f"[PATCH] httpx.Limits default patched to max_connections={CONNECTION_LIMIT}", file=sys.stderr)
+    
+    # Also patch the module-level DEFAULT_LIMITS that was already created at import time
+    import httpx._config
+    httpx._config.DEFAULT_LIMITS = httpx.Limits(
+        max_connections=CONNECTION_LIMIT,
+        max_keepalive_connections=CONNECTION_LIMIT
+    )
+    # Also update the reference in the client module
+    import httpx._client
+    httpx._client.DEFAULT_LIMITS = httpx._config.DEFAULT_LIMITS
+    print(f"[PATCH] httpx._config.DEFAULT_LIMITS replaced", file=sys.stderr)
 except ImportError:
     pass
 
